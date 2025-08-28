@@ -26,26 +26,38 @@ steps:
         echo "Coverage: ${TOTAL}%"
         awk -v t="$TOTAL" -v m="${MIN_COVERAGE}" 'BEGIN{ if(t+0 < m) exit 1 }' || (echo "Coverage abaixo de ${MIN_COVERAGE}%"; exit 1)
 
+  # Build & push sem docker.sock (Kaniko)
   build_push:
-    image: docker:27.1-cli
+    image: gcr.io/kaniko-project/executor:latest
     depends_on: [coverage_gate]
     environment:
-      DOCKER_DRIVER: overlay2
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    secrets: [REGISTRY_USER, REGISTRY_TOKEN]
+      REGISTRY_USER:
+        from_secret: REGISTRY_USER
+      REGISTRY_TOKEN:
+        from_secret: REGISTRY_TOKEN
     commands:
-      - echo "${REGISTRY_TOKEN}" | docker login "${REGISTRY}" -u "${REGISTRY_USER}" --password-stdin
       - SHA=${CI_COMMIT_SHA}
-      - docker build -t "${IMAGE_REPO}:${SHA}" -t "${IMAGE_REPO}:latest" .
-      - docker push "${IMAGE_REPO}:${SHA}"
-      - docker push "${IMAGE_REPO}:latest"
+      # autentica no GHCR gerando /kaniko/.docker/config.json
+      - AUTH=$(printf "%s:%s" "$REGISTRY_USER" "$REGISTRY_TOKEN" | base64 -w 0 2>/dev/null || printf "%s:%s" "$REGISTRY_USER" "$REGISTRY_TOKEN" | base64)
+      - |
+        mkdir -p /kaniko/.docker
+        cat > /kaniko/.docker/config.json <<EOF
+        { "auths": { "${REGISTRY}": { "auth": "${AUTH}" } } }
+        EOF
+      # builda e publica duas tags: sha e latest
+      - /kaniko/executor
+        --context "${CI_WORKSPACE}"
+        --dockerfile "${CI_WORKSPACE}/Dockerfile"
+        --destination "${IMAGE_REPO}:${SHA}"
+        --destination "${IMAGE_REPO}:latest"
       - echo "${SHA}" > .tag_sha
 
   bump_tag_commit:
     image: alpine:3.20
     depends_on: [build_push]
-    secrets: [GITHUB_TOKEN]
+    environment:
+      GITHUB_TOKEN:
+        from_secret: GITHUB_TOKEN
     commands:
       - apk add --no-cache git yq
       - git config --global user.email "ci@wellrcosta.dev"
@@ -66,14 +78,20 @@ steps:
   apply_secrets:
     image: bitnami/kubectl:1.30
     depends_on: [bump_tag_commit]
-    secrets: [KUBE_CONFIG, REGISTRY_USER, REGISTRY_TOKEN]
+    environment:
+      KUBE_CONFIG:
+        from_secret: KUBE_CONFIG
+      REGISTRY_USER:
+        from_secret: REGISTRY_USER
+      REGISTRY_TOKEN:
+        from_secret: REGISTRY_TOKEN
     commands:
       - mkdir -p $HOME/.kube
       - echo "$KUBE_CONFIG" > $HOME/.kube/config
       - chmod 600 $HOME/.kube/config
       # imagePullSecret (GHCR) no namespace
-      - kubectl -n ${KUBE_NAMESPACE} create secret docker-registry registry-cred
-        --docker-server=${REGISTRY} --docker-username="${REGISTRY_USER}" --docker-password="${REGISTRY_TOKEN}"
+      - kubectl -n ${KUBE_NAMESPACE} create secret docker-registry registry-cred \
+        --docker-server=${REGISTRY} --docker-username="${REGISTRY_USER}" --docker-password="${REGISTRY_TOKEN}" \
         --dry-run=client -o yaml | kubectl apply -f -
       # Secret com .env + espelho em env vars
       - |
@@ -94,7 +112,6 @@ steps:
             key=substr($1,6); val=$0; sub(/^[^=]*=/,"",val);
             printf "    %s=%s\n", key, val
           }'
-          # agora as chaves individuais
           env | awk -F= '/^ENV__/ {
             key=substr($1,6); val=$0; sub(/^[^=]*=/,"",val);
             gsub(/\\/,"\\\\",val); gsub(/"/,"\\\"",val);
