@@ -3,7 +3,7 @@ variables:
 
 steps:
   sanity_env:
-    name: Sanity: envs presentes?
+    name: Sanity envs presentes
     image: alpine:3.20
     secrets: [REGISTRY_USER, REGISTRY_TOKEN]
     commands:
@@ -104,8 +104,8 @@ steps:
     commands:
       - mkdir -p $HOME/.kube && echo "$KUBE_CONFIG" > $HOME/.kube/config && chmod 600 $HOME/.kube/config
       - kubectl -n ${KUBE_NAMESPACE} create secret docker-registry registry-cred \
-          --docker-server=${REGISTRY} --docker-username="${REGISTRY_USER}" --docker-password="${REGISTRY_TOKEN}" \
-          --dry-run=client -o yaml | kubectl apply -f -
+        --docker-server=${REGISTRY} --docker-username="${REGISTRY_USER}" --docker-password="${REGISTRY_TOKEN}" \
+        --dry-run=client -o yaml | kubectl apply -f -
       - |
         NAME=${APP_NAME}
         NS=${KUBE_NAMESPACE}
