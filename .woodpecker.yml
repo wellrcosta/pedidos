@@ -3,23 +3,8 @@ steps:
     name: Install & Test
     image: node:20
     commands:
-      - corepack enable
-      - |
-        if [ -f pnpm-lock.yaml ]; then
-          corepack prepare pnpm@latest --activate
-          pnpm install --frozen-lockfile || pnpm install
-          pnpm test -- --coverage --coverageReporters=lcov
-        elif [ -f yarn.lock ]; then
-          corepack prepare yarn@stable --activate
-          yarn install --frozen-lockfile || yarn install
-          yarn test --coverage --coverageReporters=lcov
-        elif [ -f package-lock.json ]; then
-          npm ci
-          npm run test -- --coverage --coverageReporters=lcov
-        else
-          npm install
-          npm run test -- --coverage --coverageReporters=lcov
-        fi
+      - npm ci
+      - npm run test -- --coverage
     when:
       branch: [main]
       event: [push, manual]
