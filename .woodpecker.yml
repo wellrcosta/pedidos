@@ -30,14 +30,15 @@ steps:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
+      REGISTRY: ghcr.io # <- valor fixo aqui FUNCIONA
       REGISTRY_USER:
         from_secret: REGISTRY_USER
       REGISTRY_TOKEN:
         from_secret: REGISTRY_TOKEN
-      REGISTRY: ghcr.io
     commands:
       - echo "${REGISTRY_TOKEN}" | docker login "${REGISTRY}" -u "${REGISTRY_USER}" --password-stdin
-      - IMAGE_REPO=${REGISTRY}/wellrcosta/${CI_REPO_NAME}
+      - IMAGE_REPO_NAME=$(echo "${CI_REPO_NAME}" | tr '[:upper:]' '[:lower:]')
+      - IMAGE_REPO=${REGISTRY}/wellrcosta/${IMAGE_REPO_NAME}
       - SHA=${CI_COMMIT_SHA}
       - docker build -t "${IMAGE_REPO}:${SHA}" -t "${IMAGE_REPO}:latest" .
       - docker push "${IMAGE_REPO}:${SHA}"
@@ -77,22 +78,20 @@ steps:
     name: Apply Secrets to K8s
     image: bitnami/kubectl:1.30
     environment:
+      REGISTRY: ghcr.io
       KUBE_CONFIG:
         from_secret: KUBE_CONFIG
       REGISTRY_USER:
         from_secret: REGISTRY_USER
       REGISTRY_TOKEN:
         from_secret: REGISTRY_TOKEN
-      REGISTRY: ghcr.io
       KUBE_NAMESPACE: ${KUBE_NAMESPACE=local-services}
       APP_NAME: ${APP_NAME=${CI_REPO_NAME}}
     commands:
       - mkdir -p $HOME/.kube && echo "$KUBE_CONFIG" > $HOME/.kube/config && chmod 600 $HOME/.kube/config
-      # imagePullSecret (GHCR)
       - kubectl -n ${KUBE_NAMESPACE} create secret docker-registry registry-cred \
         --docker-server=${REGISTRY} --docker-username="${REGISTRY_USER}" --docker-password="${REGISTRY_TOKEN}" \
         --dry-run=client -o yaml | kubectl apply -f -
-      # Secret com .env + espelho em env vars
       - |
         NAME=${APP_NAME}
         NS=${KUBE_NAMESPACE}
