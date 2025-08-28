@@ -28,7 +28,6 @@ steps:
     when:
       branch: [main]
       event: [push, manual]
-    depends_on: [install_and_test]
 
   docker_build_push:
     name: Docker Build & Push (Docker Hub)
@@ -56,7 +55,6 @@ steps:
     when:
       branch: [main]
       event: [push, manual]
-    depends_on: [install_and_test]
 
   bump_tag_commit:
     name: Bump tag in deploy.values.yaml
@@ -83,7 +81,6 @@ steps:
     when:
       branch: [main]
       event: [push, manual]
-    depends_on: [docker_build_push]
 
   apply_secrets:
     name: Apply Secrets to K8s
@@ -135,4 +132,3 @@ steps:
     when:
       branch: [main]
       event: [push, manual]
-    depends_on: [bump_tag_commit]
