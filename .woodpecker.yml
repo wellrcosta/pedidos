@@ -40,12 +40,12 @@ steps:
       - set -eu
       - echo "$DOCKER_TOKEN" | docker login -u "$DOCKER_USER" --password-stdin
       - SHA="${CI_COMMIT_SHA}"
-      - docker build -t "wellrcosta/${CI_REPO_NAME}:latest" -t "wellrcosta/${CI_REPO_NAME}:${SHA}" .
+      - docker build -t "wellrcosta/${CI_REPO_NAME}:latest" -t "wellrcosta/${CI_REPO_NAME}:${CI_COMMIT_SHA}" .
       - docker push "wellrcosta/${CI_REPO_NAME}:latest"
-      - docker push "wellrcosta/${CI_REPO_NAME}:${SHA}"
-      - echo "${SHA}" > .tag_sha
+      - docker push "wellrcosta/${CI_REPO_NAME}:${CI_COMMIT_SHA}"
+      - echo "${CI_COMMIT_SHA}" > .tag_sha
       - docker rmi "wellrcosta/${CI_REPO_NAME}:latest" || true
-      - docker rmi "wellrcosta/${CI_REPO_NAME}:${SHA}" || true
+      - docker rmi "wellrcosta/${CI_REPO_NAME}:${CI_COMMIT_SHA}" || true
     when:
       branch: [main]
       event: [push, manual]
