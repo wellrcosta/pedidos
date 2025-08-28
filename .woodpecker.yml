@@ -1,3 +1,5 @@
+# .woodpecker.yml — Docker Hub + tag por SHA + bump automático
+
 steps:
   install_and_test:
     name: Install & Test
@@ -40,6 +42,7 @@ steps:
       - docker build -t "wellrcosta/${CI_REPO_NAME}:latest" -t "wellrcosta/${CI_REPO_NAME}:${CI_COMMIT_SHA}" .
       - docker push "wellrcosta/${CI_REPO_NAME}:latest"
       - docker push "wellrcosta/${CI_REPO_NAME}:${CI_COMMIT_SHA}"
+      # opcional manter .tag_sha, mas o bump não dependerá mais dele
       - echo "${CI_COMMIT_SHA}" > .tag_sha || true
       - docker rmi "wellrcosta/${CI_REPO_NAME}:latest" || true
       - docker rmi "wellrcosta/${CI_REPO_NAME}:${CI_COMMIT_SHA}" || true
@@ -52,20 +55,24 @@ steps:
     image: alpine:3.20
     environment:
       GITHUB_TOKEN:
-        from_secret: GITHUB_TOKEN
+        from_secret: GITHUB_TOKEN # PAT com escopo "repo"
     commands:
       - set -eu
       - apk add --no-cache git yq
       - git config --global user.email "ci@wellrcosta.dev"
       - git config --global user.name  "woodpecker-bot"
+      # garante que o workspace é seguro
       - git config --global --add safe.directory /woodpecker/src || true
+      # descobre owner/repo de forma robusta
       - REPO_FULL="${CI_REPO:-wellrcosta/${CI_REPO_NAME}}"
       - : "${REPO_FULL:?CI_REPO e CI_REPO_NAME não disponíveis}"
+      # usa CI_COMMIT_SHA diretamente (sem depender de .tag_sha)
       - SHA="${CI_COMMIT_SHA:-}"
       - |
         if [ -z "$SHA" ]; then
           SHA="$(git rev-parse HEAD)"
         fi
+      # atualiza a tag no values
       - |
         if [ -f deploy.values.yaml ]; then
           yq -i ".tag = \"${SHA}\"" deploy.values.yaml
@@ -75,6 +82,7 @@ steps:
           echo "deploy.values.yaml não encontrado na raiz."
           exit 1
         fi
+      # push usando header de autorização (evita problemas na URL)
       - git -c "http.extraheader=AUTHORIZATION: bearer ${GITHUB_TOKEN}" push https://github.com/${REPO_FULL}.git HEAD:main
     when:
       branch: [main]
