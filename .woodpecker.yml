@@ -1,4 +1,4 @@
-# .woodpecker.yml — Docker Hub + SHA + bump automático (sem erros de YAML)
+# .woodpecker.yml — Docker Hub + SHA + bump automático (quoting à prova de YAML)
 
 steps:
   install_and_test:
@@ -39,7 +39,6 @@ steps:
     commands:
       - set -eu
       - echo "$DOCKER_TOKEN" | docker login -u "$DOCKER_USER" --password-stdin
-      - SHA="${CI_COMMIT_SHA}"
       - docker build -t "wellrcosta/${CI_REPO_NAME}:latest" -t "wellrcosta/${CI_REPO_NAME}:${CI_COMMIT_SHA}" .
       - docker push "wellrcosta/${CI_REPO_NAME}:latest"
       - docker push "wellrcosta/${CI_REPO_NAME}:${CI_COMMIT_SHA}"
@@ -57,21 +56,37 @@ steps:
       GITHUB_TOKEN:
         from_secret: GITHUB_TOKEN # PAT com escopo "repo"
     commands:
-      - set -eu
-      - apk add --no-cache git yq
-      - git config --global user.email "ci@wellrcosta.dev"
-      - git config --global user.name  "woodpecker-bot"
-      # descobre owner/repo (usa CI_REPO; se vazio, cai para wellrcosta/CI_REPO_NAME)
-      - REPO_FULL="${CI_REPO:-wellrcosta/${CI_REPO_NAME}}"
-      # lê o SHA do arquivo se existir; se não, usa CI_COMMIT_SHA
-      - if [ -f .tag_sha ]; then SHA="$(cat .tag_sha)"; else SHA="${CI_COMMIT_SHA}"; fi
-      - if [ ! -f deploy.values.yaml ]; then echo "deploy.values.yaml não encontrado na raiz."; exit 1; fi
-      - yq -i ".tag = \"${SHA}\"" deploy.values.yaml
-      - git add deploy.values.yaml
-      - git commit -m "chore(ci): update image tag to ${SHA}" || true
-      # push usando x-access-token (evita problemas de YAML/headers)
-      - git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO_FULL}.git"
-      - git push origin HEAD:main
+      - |-
+        set -eu
+        apk add --no-cache git yq
+        git config --global user.email "ci@wellrcosta.dev"
+        git config --global user.name "woodpecker-bot"
+        # workspace seguro (alguns runners exigem)
+        git config --global --add safe.directory /woodpecker/src || true
+
+        # owner/repo: usa CI_REPO; se vazio, cai para wellrcosta/CI_REPO_NAME
+        REPO_FULL="${CI_REPO:-wellrcosta/${CI_REPO_NAME}}"
+
+        # SHA: usa .tag_sha se existir; senão CI_COMMIT_SHA
+        if [ -f .tag_sha ]; then
+          SHA="$(cat .tag_sha)"
+        else
+          SHA="${CI_COMMIT_SHA}"
+        fi
+
+        if [ ! -f deploy.values.yaml ]; then
+          echo "deploy.values.yaml não encontrado na raiz."
+          exit 1
+        fi
+
+        # atualiza tag
+        yq -i ".tag = \"${SHA}\"" deploy.values.yaml
+        git add deploy.values.yaml
+        git commit -m "chore(ci): update image tag to ${SHA}" || true
+
+        # push usando x-access-token (evita problemas de URL/encoding)
+        git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO_FULL}.git"
+        git push origin HEAD:main
     when:
       branch: [main]
       event: [push, manual]
