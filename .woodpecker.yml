@@ -1,0 +1,104 @@
+when:
+  event: [push, manual]
+  branch: [main]
+
+variables:
+  REGISTRY: ${REGISTRY=ghcr.io}
+  IMAGE_REPO: ${IMAGE_REPO=${REGISTRY}/wellrcosta/${CI_REPO_NAME}}
+  KUBE_NAMESPACE: ${KUBE_NAMESPACE=local-services}
+  APP_NAME: ${APP_NAME=${CI_REPO_NAME}}
+  MIN_COVERAGE: ${MIN_COVERAGE=60}
+
+steps:
+  tests:
+    image: node:20-alpine
+    commands:
+      - npm ci
+      - npm test -- --coverage --coverageReporters=json-summary
+      - node -e "console.log(require('./coverage/coverage-summary.json').total.statements.pct || 0)" > .coverage
+
+  coverage_gate:
+    image: alpine:3.20
+    depends_on: [tests]
+    commands:
+      - |
+        TOTAL=$(cat .coverage 2>/dev/null || echo 0)
+        echo "Coverage: ${TOTAL}%"
+        awk -v t="$TOTAL" -v m="${MIN_COVERAGE}" 'BEGIN{ if(t+0 < m) exit 1 }' || (echo "Coverage abaixo de ${MIN_COVERAGE}%"; exit 1)
+
+  build_push:
+    image: docker:27.1-cli
+    depends_on: [coverage_gate]
+    environment:
+      - DOCKER_DRIVER=overlay2
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    secrets: [REGISTRY_USER, REGISTRY_TOKEN]
+    commands:
+      - echo "${REGISTRY_TOKEN}" | docker login "${REGISTRY}" -u "${REGISTRY_USER}" --password-stdin
+      - SHA=${CI_COMMIT_SHA}
+      - docker build -t "${IMAGE_REPO}:${SHA}" -t "${IMAGE_REPO}:latest" .
+      - docker push "${IMAGE_REPO}:${SHA}"
+      - docker push "${IMAGE_REPO}:latest"
+      - echo "${SHA}" > .tag_sha
+
+  bump_tag_commit:
+    image: alpine:3.20
+    depends_on: [build_push]
+    secrets: [GITHUB_TOKEN]
+    commands:
+      - apk add --no-cache git yq
+      - git config --global user.email "ci@wellrcosta.dev"
+      - git config --global user.name "woodpecker-bot"
+      - git remote set-url origin "https://wellrcosta:${GITHUB_TOKEN}@github.com/wellrcosta/${CI_REPO_NAME}.git"
+      - SHA=$(cat .tag_sha)
+      - |
+        if [ -f deploy.values.yaml ]; then
+          yq -i ".tag = \"${SHA}\"" deploy.values.yaml
+          git add deploy.values.yaml
+          git commit -m "chore(ci): update image tag to ${SHA}" || true
+          git push origin HEAD:main
+        else
+          echo "deploy.values.yaml não encontrado; verifique se está na raiz."
+          exit 1
+        fi
+
+  apply_secrets:
+    image: bitnami/kubectl:1.30
+    depends_on: [bump_tag_commit]
+    secrets: [KUBE_CONFIG, REGISTRY_USER, REGISTRY_TOKEN]
+    commands:
+      - mkdir -p $HOME/.kube
+      - echo "$KUBE_CONFIG" > $HOME/.kube/config
+      - chmod 600 $HOME/.kube/config
+      # imagePullSecret (GHCR) no namespace
+      - kubectl -n ${KUBE_NAMESPACE} create secret docker-registry registry-cred
+        --docker-server=${REGISTRY} --docker-username="${REGISTRY_USER}" --docker-password="${REGISTRY_TOKEN}"
+        --dry-run=client -o yaml | kubectl apply -f -
+      # Secret com .env + espelho em env vars
+      - |
+        NAME=${APP_NAME}
+        NS=${KUBE_NAMESPACE}
+        TMP=/tmp/secret.yaml
+        {
+          echo "apiVersion: v1"
+          echo "kind: Secret"
+          echo "metadata:"
+          echo "  name: ${NAME}-secrets"
+          echo "  namespace: ${NS}"
+          echo "type: Opaque"
+          echo "stringData:"
+          echo "  dotenv: |"
+          # ENV__* viram linhas do .env e também chaves individuais
+          env | awk -F= '/^ENV__/ {
+            key=substr($1,6); val=$0; sub(/^[^=]*=/,"",val);
+            printf "    %s=%s\n", key, val
+          }'
+          # agora as chaves individuais
+          env | awk -F= '/^ENV__/ {
+            key=substr($1,6); val=$0; sub(/^[^=]*=/,"",val);
+            gsub(/\\/,"\\\\",val); gsub(/"/,"\\\"",val);
+            printf "  \"%s\": \"%s\"\n", key, val
+          }'
+        } > $TMP
+        kubectl apply -f $TMP
