@@ -22,7 +22,7 @@ steps:
         fi
     when:
       branch: [main]
-      event: [push]
+      event: [push, manual]
 
   upload-coverage-codecov:
     name: Upload Coverage to Codecov
@@ -38,7 +38,7 @@ steps:
     depends_on: [install-and-test]
     when:
       branch: [main]
-      event: [push]
+      event: [push, manual]
 
   docker-build-push:
     name: Docker Build & Push (GHCR)
@@ -62,7 +62,7 @@ steps:
     depends_on: [upload-coverage-codecov]
     when:
       branch: [main]
-      event: [push]
+      event: [push, manual]
 
   bump-tag-commit:
     name: Bump tag in deploy.values.yaml
@@ -89,7 +89,7 @@ steps:
     depends_on: [docker-build-push]
     when:
       branch: [main]
-      event: [push]
+      event: [push, manual]
 
   apply-secrets:
     name: Apply Secrets to K8s
@@ -138,4 +138,4 @@ steps:
     depends_on: [bump-tag-commit]
     when:
       branch: [main]
-      event: [push]
+      event: [push, manual]
