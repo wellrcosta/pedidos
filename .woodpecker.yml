@@ -1,5 +1,5 @@
 steps:
-  install-and-test:
+  install_and_test:
     name: Install & Test
     image: node:20
     commands:
@@ -24,7 +24,7 @@ steps:
       branch: [main]
       event: [push, manual]
 
-  upload-coverage-codecov:
+  upload_coverage_codecov:
     name: Upload Coverage to Codecov
     image: alpine:latest
     environment:
@@ -35,12 +35,12 @@ steps:
       - curl -Os https://uploader.codecov.io/latest/linux/codecov
       - chmod +x codecov
       - ./codecov --token "$CODECOV_TOKEN" --fail-under=60 --file=coverage/lcov.info
-    depends_on: [install-and-test]
+    depends_on: [install_and_test]
     when:
       branch: [main]
       event: [push, manual]
 
-  docker-build-push:
+  docker_build_push:
     name: Docker Build & Push (GHCR)
     image: docker:27.1-cli
     volumes:
@@ -59,12 +59,12 @@ steps:
       - docker push "${IMAGE_REPO}:${SHA}"
       - docker push "${IMAGE_REPO}:latest"
       - echo "${SHA}" > .tag_sha
-    depends_on: [upload-coverage-codecov]
+    depends_on: [upload_coverage_codecov]
     when:
       branch: [main]
       event: [push, manual]
 
-  bump-tag-commit:
+  bump_tag_commit:
     name: Bump tag in deploy.values.yaml
     image: alpine:3.20
     environment:
@@ -86,12 +86,12 @@ steps:
           echo "deploy.values.yaml não encontrado na raiz."
           exit 1
         fi
-    depends_on: [docker-build-push]
+    depends_on: [docker_build_push]
     when:
       branch: [main]
       event: [push, manual]
 
-  apply-secrets:
+  apply_secrets:
     name: Apply Secrets to K8s
     image: bitnami/kubectl:1.30
     environment:
@@ -135,7 +135,7 @@ steps:
           }'
         } > $TMP
         kubectl apply -f $TMP
-    depends_on: [bump-tag-commit]
+    depends_on: [bump_tag_commit]
     when:
       branch: [main]
       event: [push, manual]
