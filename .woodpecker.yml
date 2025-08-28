@@ -1,17 +1,9 @@
+# .woodpecker.yml — Docker Hub + tag por SHA + bump automático
 variables:
-  REGISTRY: ghcr.io
+  REGISTRY: docker.io
+  DOCKER_SERVER: https://index.docker.io/v1/
 
 steps:
-  sanity_env:
-    name: Sanity envs presentes
-    image: alpine:3.20
-    secrets: [REGISTRY_USER, REGISTRY_TOKEN]
-    commands:
-      - echo "Checando variáveis esperadas..."
-      - test -n "${REGISTRY:-}" && echo "REGISTRY=OK (${REGISTRY})" || (echo "REGISTRY=VAZIO"; exit 1)
-      - test -n "${REGISTRY_USER:-}" && echo "REGISTRY_USER=OK" || (echo "REGISTRY_USER=VAZIO"; exit 1)
-      - test -n "${REGISTRY_TOKEN:-}" && echo "REGISTRY_TOKEN=OK" || (echo "REGISTRY_TOKEN=VAZIO"; exit 1)
-
   install_and_test:
     name: Install & Test
     image: node:20
@@ -21,7 +13,6 @@ steps:
     when:
       branch: [main]
       event: [push, manual]
-    depends_on: [sanity_env]
 
   upload_coverage_codecov:
     name: Upload Coverage to Codecov
@@ -40,27 +31,28 @@ steps:
     depends_on: [install_and_test]
 
   docker_build_push:
-    name: Docker Build & Push (GHCR)
-    image: docker:27.1-cli
+    name: Docker Build & Push (Docker Hub)
+    image: docker:24.0.7-cli
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-    secrets: [REGISTRY_USER, REGISTRY_TOKEN]
     environment:
       REGISTRY: ${REGISTRY}
+      DOCKER_USER:
+        from_secret: DOCKER_USER # seu usuário do Docker Hub
+      DOCKER_TOKEN:
+        from_secret: DOCKER_TOKEN # access token do Docker Hub
     commands:
       - set -eu
-      - : "${REGISTRY:?REGISTRY ausente}"
-      - : "${REGISTRY_USER:?REGISTRY_USER ausente (defina secret no Woodpecker)}"
-      - : "${REGISTRY_TOKEN:?REGISTRY_TOKEN ausente (defina secret no Woodpecker)}"
-      - echo "Fazendo login em ${REGISTRY} como ${REGISTRY_USER}"
-      - echo "${REGISTRY_TOKEN}" | docker login "${REGISTRY}" -u "${REGISTRY_USER}" --password-stdin
-      - IMAGE_REPO_NAME=$(echo "${CI_REPO_NAME}" | tr '[:upper:]' '[:lower:]')
-      - IMAGE_REPO=${REGISTRY}/wellrcosta/${IMAGE_REPO_NAME}
-      - SHA=${CI_COMMIT_SHA}
-      - docker build -t "${IMAGE_REPO}:${SHA}" -t "${IMAGE_REPO}:latest" .
-      - docker push "${IMAGE_REPO}:${SHA}"
-      - docker push "${IMAGE_REPO}:latest"
+      - echo "$DOCKER_TOKEN" | docker login -u "$DOCKER_USER" --password-stdin
+      - REPO_NAME=$(echo "$CI_REPO_NAME" | tr '[:upper:]' '[:lower:]')
+      - IMAGE="${DOCKER_USER}/${REPO_NAME}"
+      - SHA="${CI_COMMIT_SHA}"
+      - docker build -t "${IMAGE}:latest" -t "${IMAGE}:${SHA}" .
+      - docker push "${IMAGE}:latest"
+      - docker push "${IMAGE}:${SHA}"
       - echo "${SHA}" > .tag_sha
+      - docker rmi "${IMAGE}:latest" || true
+      - docker rmi "${IMAGE}:${SHA}" || true
     when:
       branch: [main]
       event: [push, manual]
@@ -71,7 +63,7 @@ steps:
     image: alpine:3.20
     environment:
       GITHUB_TOKEN:
-        from_secret: GITHUB_TOKEN
+        from_secret: GITHUB_TOKEN # PAT com escopo repo para commitar
     commands:
       - apk add --no-cache git yq
       - git config --global user.email "ci@wellrcosta.dev"
@@ -96,16 +88,26 @@ steps:
   apply_secrets:
     name: Apply Secrets to K8s
     image: bitnami/kubectl:1.30
-    secrets: [REGISTRY_USER, REGISTRY_TOKEN, KUBE_CONFIG]
     environment:
       REGISTRY: ${REGISTRY}
+      DOCKER_SERVER: ${DOCKER_SERVER}
       KUBE_NAMESPACE: ${KUBE_NAMESPACE=local-services}
       APP_NAME: ${APP_NAME=${CI_REPO_NAME}}
+      KUBE_CONFIG:
+        from_secret: KUBE_CONFIG
+      DOCKER_USER:
+        from_secret: DOCKER_USER
+      DOCKER_TOKEN:
+        from_secret: DOCKER_TOKEN
     commands:
       - mkdir -p $HOME/.kube && echo "$KUBE_CONFIG" > $HOME/.kube/config && chmod 600 $HOME/.kube/config
+      # imagePullSecret para Docker Hub (funciona para repo privado; se público, não atrapalha)
       - kubectl -n ${KUBE_NAMESPACE} create secret docker-registry registry-cred \
-        --docker-server=${REGISTRY} --docker-username="${REGISTRY_USER}" --docker-password="${REGISTRY_TOKEN}" \
+        --docker-server="${DOCKER_SERVER}" \
+        --docker-username="${DOCKER_USER}" \
+        --docker-password="${DOCKER_TOKEN}" \
         --dry-run=client -o yaml | kubectl apply -f -
+      # Secret do app a partir de ENV__*
       - |
         NAME=${APP_NAME}
         NS=${KUBE_NAMESPACE}

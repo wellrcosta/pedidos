@@ -1,7 +1,7 @@
 name: pedidos
 namespace: local-services
 
-imageRepo: ghcr.io/wellrcosta/pedidos
+imageRepo: docker.io/wellrcosta/pedidos
 tag: latest
 port: 80
 
