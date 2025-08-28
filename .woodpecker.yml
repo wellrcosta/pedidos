@@ -1,4 +1,4 @@
-# .woodpecker.yml — Docker Hub + SHA + bump automático (quoting à prova de YAML)
+# .woodpecker.yml — Docker Hub + SHA + bump automático (com guard-clauses)
 
 steps:
   install_and_test:
@@ -55,36 +55,43 @@ steps:
     environment:
       GITHUB_TOKEN:
         from_secret: GITHUB_TOKEN # PAT com escopo "repo"
+      OWNER: wellrcosta # ajuste se o owner do repo GitHub for outro
     commands:
       - |-
         set -eu
         apk add --no-cache git yq
+
+        # 0) valida secret
+        : "${GITHUB_TOKEN:?GITHUB_TOKEN ausente (defina o PAT com escopo repo no Woodpecker)}"
+
+        # 1) identidade git e workspace seguro
         git config --global user.email "ci@wellrcosta.dev"
-        git config --global user.name "woodpecker-bot"
-        # workspace seguro (alguns runners exigem)
+        git config --global user.name  "woodpecker-bot"
         git config --global --add safe.directory /woodpecker/src || true
 
-        # owner/repo: usa CI_REPO; se vazio, cai para wellrcosta/CI_REPO_NAME
-        REPO_FULL="${CI_REPO:-wellrcosta/${CI_REPO_NAME}}"
-
-        # SHA: usa .tag_sha se existir; senão CI_COMMIT_SHA
-        if [ -f .tag_sha ]; then
-          SHA="$(cat .tag_sha)"
+        # 2) descobre owner/repo para push
+        if [ -n "${CI_REPO:-}" ]; then
+          REPO_FULL="${CI_REPO}"
         else
-          SHA="${CI_COMMIT_SHA}"
+          : "${CI_REPO_NAME:?CI_REPO_NAME ausente}"
+          REPO_FULL="${OWNER}/${CI_REPO_NAME}"
         fi
 
-        if [ ! -f deploy.values.yaml ]; then
-          echo "deploy.values.yaml não encontrado na raiz."
-          exit 1
+        # 3) define SHA (usa .tag_sha se existir; senão CI_COMMIT_SHA)
+        if [ -f .tag_sha ]; then
+          export SHA="$(cat .tag_sha)"
+        else
+          : "${CI_COMMIT_SHA:?CI_COMMIT_SHA ausente}"
+          export SHA="${CI_COMMIT_SHA}"
         fi
 
-        # atualiza tag
-        yq -i ".tag = \"${SHA}\"" deploy.values.yaml
+        # 4) garante deploy.values.yaml e atualiza tag com yq usando env
+        [ -f deploy.values.yaml ] || { echo "deploy.values.yaml não encontrado na raiz."; exit 1; }
+        yq -i '.tag = strenv(SHA)' deploy.values.yaml
         git add deploy.values.yaml
         git commit -m "chore(ci): update image tag to ${SHA}" || true
 
-        # push usando x-access-token (evita problemas de URL/encoding)
+        # 5) push com x-access-token (sem expor token em logs)
         git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO_FULL}.git"
         git push origin HEAD:main
     when:
