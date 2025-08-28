@@ -10,42 +10,45 @@ variables:
   MIN_COVERAGE: ${MIN_COVERAGE=60}
 
 steps:
-  tests:
-    image: node:20-alpine
+  install-and-test:
+    name: Install & Test
+    image: node:20
     commands:
-      # Habilita corepack (gerencia pnpm/yarn) e detecta o gerenciador
       - corepack enable
       - |
         if [ -f pnpm-lock.yaml ]; then
           corepack prepare pnpm@latest --activate
-          PM=pnpm
           pnpm install --frozen-lockfile || pnpm install
+          pnpm run test -- --coverage
         elif [ -f yarn.lock ]; then
           corepack prepare yarn@stable --activate
-          PM=yarn
           yarn install --frozen-lockfile || yarn install
+          yarn test --coverage
         elif [ -f package-lock.json ]; then
-          PM=npm
           npm ci
+          npm run test -- --coverage
         else
-          PM=npm
           npm install
+          npm run test -- --coverage
         fi
-        echo "$PM" > .pm
-      # Testes com cobertura (usa o gerenciador detectado)
-      - |
-        PM=$(cat .pm)
-        if [ "$PM" = "pnpm" ]; then
-          pnpm test -- --coverage --coverageReporters=json-summary
-        elif [ "$PM" = "yarn" ]; then
-          yarn test --coverage --coverageReporters=json-summary
-        else
-          npm test -- --coverage --coverageReporters=json-summary
-        fi
-      # Extrai % total para .coverage (contrato do gate)
-      - node -e "console.log(require('./coverage/coverage-summary.json').total.statements.pct || 0)" > .coverage
+    when:
+      branch: [ main ]
+      event: [ push ]
 
-  coverage_gate:
+  upload-coverage-codecov:
+    name: Upload Coverage to Codecov
+    image: alpine:latest
+    environment:
+      CODECOV_TOKEN:
+        from_secret: CODECOV_TOKEN
+    commands:
+      - apk add --no-cache curl bash
+      - curl -Os https://uploader.codecov.io/latest/linux/codecov
+      - chmod +x codecov
+      - ./codecov --token $CODECOV_TOKEN --fail-under=60 --file=coverage/lcov.info
+    when:
+      branch: [ main ]
+      event: [ push ]
     image: alpine:3.20
     depends_on: [tests]
     commands:
