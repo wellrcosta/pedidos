@@ -33,19 +33,19 @@ steps:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       DOCKER_USER:
-        from_secret: DOCKER_USER # seu usuário do Docker Hub
+        from_secret: DOCKER_USER
       DOCKER_TOKEN:
-        from_secret: DOCKER_TOKEN # access token do Docker Hub
+        from_secret: DOCKER_TOKEN
     commands:
       - set -eu
       - echo "$DOCKER_TOKEN" | docker login -u "$DOCKER_USER" --password-stdin
       - SHA="${CI_COMMIT_SHA}"
-      - docker build -t "${DOCKER_USER}/${CI_REPO_NAME}:latest" -t "${DOCKER_USER}/${CI_REPO_NAME}:${SHA}" .
-      - docker push "${DOCKER_USER}/${CI_REPO_NAME}:latest"
-      - docker push "${DOCKER_USER}/${CI_REPO_NAME}:${SHA}"
+      - docker build -t "wellrcosta/${CI_REPO_NAME}:latest" -t "wellrcosta/${CI_REPO_NAME}:${SHA}" .
+      - docker push "wellrcosta/${CI_REPO_NAME}:latest"
+      - docker push "wellrcosta/${CI_REPO_NAME}:${SHA}"
       - echo "${SHA}" > .tag_sha
-      - docker rmi "${DOCKER_USER}/${CI_REPO_NAME}:latest" || true
-      - docker rmi "${DOCKER_USER}/${CI_REPO_NAME}:${SHA}" || true
+      - docker rmi "wellrcosta/${CI_REPO_NAME}:latest" || true
+      - docker rmi "wellrcosta/${CI_REPO_NAME}:${SHA}" || true
     when:
       branch: [main]
       event: [push, manual]
