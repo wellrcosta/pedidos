@@ -27,7 +27,6 @@ steps:
       - curl -Os https://uploader.codecov.io/latest/linux/codecov
       - chmod +x codecov
       - ./codecov --token "$CODECOV_TOKEN" --fail-under=60 --file=coverage/lcov.info
-    depends_on: [install_and_test]
     when:
       branch: [main]
       event: [push, manual]
@@ -53,7 +52,6 @@ steps:
       - echo "${SHA}" > .tag_sha
       - docker rmi "${IMAGE_REPO}:latest" || true
       - docker rmi "${IMAGE_REPO}:${SHA}" || true
-    depends_on: [upload_coverage_codecov]
     when:
       branch: [main]
       event: [push, manual]
@@ -99,7 +97,6 @@ steps:
       # 5) push usando x-access-token (não vaza o token)
       - git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO_FULL}.git"
       - git push origin HEAD:main
-    depends_on: [docker_build_push]
     when:
       branch: [main]
       event: [push, manual]
@@ -149,7 +146,6 @@ steps:
           }'
         } > "$TMP"
         kubectl apply -f "$TMP"
-    depends_on: [bump_tag_commit]
     when:
       branch: [main]
       event: [push, manual]
