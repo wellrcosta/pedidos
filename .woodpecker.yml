@@ -41,10 +41,8 @@ steps:
       DOCKER_TOKEN:
         from_secret: DOCKER_TOKEN # access token do Docker Hub
     commands:
-      - set -eu
       - echo "$DOCKER_TOKEN" | docker login -u "$DOCKER_USER" --password-stdin
-      - REPO_NAME=$(echo "$CI_REPO_NAME" | tr '[:upper:]' '[:lower:]')
-      - IMAGE="${DOCKER_USER}/${REPO_NAME}"
+      - IMAGE="${DOCKER_USER}/${CI_REPO_NAME}"
       - SHA="${CI_COMMIT_SHA}"
       - docker build -t "${IMAGE}:latest" -t "${IMAGE}:${SHA}" .
       - docker push "${IMAGE}:latest"
