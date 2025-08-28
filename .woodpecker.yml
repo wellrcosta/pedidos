@@ -1,5 +1,3 @@
-# .woodpecker.yml — Docker Hub + tag por SHA + bump automático
-
 steps:
   install_and_test:
     name: Install & Test
@@ -39,11 +37,10 @@ steps:
     commands:
       - set -eu
       - echo "$DOCKER_TOKEN" | docker login -u "$DOCKER_USER" --password-stdin
-      - SHA="${CI_COMMIT_SHA}"
       - docker build -t "wellrcosta/${CI_REPO_NAME}:latest" -t "wellrcosta/${CI_REPO_NAME}:${CI_COMMIT_SHA}" .
       - docker push "wellrcosta/${CI_REPO_NAME}:latest"
       - docker push "wellrcosta/${CI_REPO_NAME}:${CI_COMMIT_SHA}"
-      - echo "${CI_COMMIT_SHA}" > .tag_sha
+      - echo "${CI_COMMIT_SHA}" > .tag_sha || true
       - docker rmi "wellrcosta/${CI_REPO_NAME}:latest" || true
       - docker rmi "wellrcosta/${CI_REPO_NAME}:${CI_COMMIT_SHA}" || true
     when:
@@ -55,23 +52,30 @@ steps:
     image: alpine:3.20
     environment:
       GITHUB_TOKEN:
-        from_secret: GITHUB_TOKEN # PAT com escopo "repo"
+        from_secret: GITHUB_TOKEN
     commands:
+      - set -eu
       - apk add --no-cache git yq
       - git config --global user.email "ci@wellrcosta.dev"
       - git config --global user.name  "woodpecker-bot"
-      - git remote set-url origin "https://wellrcosta:${GITHUB_TOKEN}@github.com/wellrcosta/${CI_REPO_NAME}.git"
-      - SHA=$(cat .tag_sha)
+      - git config --global --add safe.directory /woodpecker/src || true
+      - REPO_FULL="${CI_REPO:-wellrcosta/${CI_REPO_NAME}}"
+      - : "${REPO_FULL:?CI_REPO e CI_REPO_NAME não disponíveis}"
+      - SHA="${CI_COMMIT_SHA:-}"
+      - |
+        if [ -z "$SHA" ]; then
+          SHA="$(git rev-parse HEAD)"
+        fi
       - |
         if [ -f deploy.values.yaml ]; then
           yq -i ".tag = \"${SHA}\"" deploy.values.yaml
           git add deploy.values.yaml
           git commit -m "chore(ci): update image tag to ${SHA}" || true
-          git push origin HEAD:main
         else
           echo "deploy.values.yaml não encontrado na raiz."
           exit 1
         fi
+      - git -c "http.extraheader=AUTHORIZATION: bearer ${GITHUB_TOKEN}" push https://github.com/${REPO_FULL}.git HEAD:main
     when:
       branch: [main]
       event: [push, manual]
@@ -80,7 +84,6 @@ steps:
     name: Apply Secrets to K8s
     image: bitnami/kubectl:1.30
     environment:
-      # servidor correto do Docker Hub para imagePullSecret
       DOCKER_SERVER: https://index.docker.io/v1/
       KUBE_NAMESPACE: ${KUBE_NAMESPACE=local-services}
       APP_NAME: ${APP_NAME=${CI_REPO_NAME}}
@@ -91,14 +94,13 @@ steps:
       DOCKER_TOKEN:
         from_secret: DOCKER_TOKEN
     commands:
+      - set -eu
       - mkdir -p $HOME/.kube && echo "$KUBE_CONFIG" > $HOME/.kube/config && chmod 600 $HOME/.kube/config
-      # imagePullSecret (necessário se o repo de imagens for privado; público também funciona, não atrapalha)
       - kubectl -n ${KUBE_NAMESPACE} create secret docker-registry registry-cred \
         --docker-server="${DOCKER_SERVER}" \
         --docker-username="${DOCKER_USER}" \
         --docker-password="${DOCKER_TOKEN}" \
         --dry-run=client -o yaml | kubectl apply -f -
-      # Secret do app a partir de ENV__* (ENV__FOO__BAR -> "FOO.BAR": "valor" e espelho .env)
       - |
         NAME=${APP_NAME}
         NS=${KUBE_NAMESPACE}
