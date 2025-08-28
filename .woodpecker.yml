@@ -35,7 +35,6 @@ steps:
       - curl -Os https://uploader.codecov.io/latest/linux/codecov
       - chmod +x codecov
       - ./codecov --token "$CODECOV_TOKEN" --fail-under=60 --file=coverage/lcov.info
-    depends_on: [install_and_test]
     when:
       branch: [main]
       event: [push, manual]
@@ -59,7 +58,6 @@ steps:
       - docker push "${IMAGE_REPO}:${SHA}"
       - docker push "${IMAGE_REPO}:latest"
       - echo "${SHA}" > .tag_sha
-    depends_on: [upload_coverage_codecov]
     when:
       branch: [main]
       event: [push, manual]
@@ -86,7 +84,6 @@ steps:
           echo "deploy.values.yaml não encontrado na raiz."
           exit 1
         fi
-    depends_on: [docker_build_push]
     when:
       branch: [main]
       event: [push, manual]
@@ -135,7 +132,6 @@ steps:
           }'
         } > $TMP
         kubectl apply -f $TMP
-    depends_on: [bump_tag_commit]
     when:
       branch: [main]
       event: [push, manual]
