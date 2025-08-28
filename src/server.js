@@ -1,4 +1,4 @@
-import http from "node:http";
+const http = require("node:http");
 
 const PORT = process.env.PORT || 3000;
 
@@ -13,4 +13,4 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, () => console.log(`up on ${PORT}`));
 
-export default server; // para os testes encerrarem o server
+module.exports = server;
