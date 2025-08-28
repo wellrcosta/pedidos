@@ -1,7 +1,4 @@
 # .woodpecker.yml — Docker Hub + tag por SHA + bump automático
-variables:
-  REGISTRY: docker.io
-  DOCKER_SERVER: https://index.docker.io/v1/
 
 steps:
   install_and_test:
@@ -35,14 +32,16 @@ steps:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
-      REGISTRY: ${REGISTRY}
       DOCKER_USER:
         from_secret: DOCKER_USER # seu usuário do Docker Hub
       DOCKER_TOKEN:
         from_secret: DOCKER_TOKEN # access token do Docker Hub
     commands:
+      - set -eu
       - echo "$DOCKER_TOKEN" | docker login -u "$DOCKER_USER" --password-stdin
-      - IMAGE="${DOCKER_USER}/${CI_REPO_NAME}"
+      # garante repo em minúsculas (Docker Hub exige nomes lowercase)
+      - REPO_NAME=$(echo "$CI_REPO_NAME" | tr '[:upper:]' '[:lower:]')
+      - IMAGE="${DOCKER_USER}/${REPO_NAME}"
       - SHA="${CI_COMMIT_SHA}"
       - docker build -t "${IMAGE}:latest" -t "${IMAGE}:${SHA}" .
       - docker push "${IMAGE}:latest"
@@ -59,7 +58,7 @@ steps:
     image: alpine:3.20
     environment:
       GITHUB_TOKEN:
-        from_secret: GITHUB_TOKEN # PAT com escopo repo para commitar
+        from_secret: GITHUB_TOKEN # PAT com escopo "repo"
     commands:
       - apk add --no-cache git yq
       - git config --global user.email "ci@wellrcosta.dev"
@@ -84,8 +83,8 @@ steps:
     name: Apply Secrets to K8s
     image: bitnami/kubectl:1.30
     environment:
-      REGISTRY: ${REGISTRY}
-      DOCKER_SERVER: ${DOCKER_SERVER}
+      # servidor correto do Docker Hub para imagePullSecret
+      DOCKER_SERVER: https://index.docker.io/v1/
       KUBE_NAMESPACE: ${KUBE_NAMESPACE=local-services}
       APP_NAME: ${APP_NAME=${CI_REPO_NAME}}
       KUBE_CONFIG:
@@ -96,13 +95,13 @@ steps:
         from_secret: DOCKER_TOKEN
     commands:
       - mkdir -p $HOME/.kube && echo "$KUBE_CONFIG" > $HOME/.kube/config && chmod 600 $HOME/.kube/config
-      # imagePullSecret para Docker Hub (funciona para repo privado; se público, não atrapalha)
+      # imagePullSecret (necessário se o repo de imagens for privado; público também funciona, não atrapalha)
       - kubectl -n ${KUBE_NAMESPACE} create secret docker-registry registry-cred \
         --docker-server="${DOCKER_SERVER}" \
         --docker-username="${DOCKER_USER}" \
         --docker-password="${DOCKER_TOKEN}" \
         --dry-run=client -o yaml | kubectl apply -f -
-      # Secret do app a partir de ENV__*
+      # Secret do app a partir de ENV__* (ENV__FOO__BAR -> "FOO.BAR": "valor" e espelho .env)
       - |
         NAME=${APP_NAME}
         NS=${KUBE_NAMESPACE}
