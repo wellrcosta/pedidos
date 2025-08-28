@@ -13,8 +13,36 @@ steps:
   tests:
     image: node:20-alpine
     commands:
-      - npm ci
-      - npm test -- --coverage --coverageReporters=json-summary
+      # Habilita corepack (gerencia pnpm/yarn) e detecta o gerenciador
+      - corepack enable
+      - |
+        if [ -f pnpm-lock.yaml ]; then
+          corepack prepare pnpm@latest --activate
+          PM=pnpm
+          pnpm install --frozen-lockfile || pnpm install
+        elif [ -f yarn.lock ]; then
+          corepack prepare yarn@stable --activate
+          PM=yarn
+          yarn install --frozen-lockfile || yarn install
+        elif [ -f package-lock.json ]; then
+          PM=npm
+          npm ci
+        else
+          PM=npm
+          npm install
+        fi
+        echo "$PM" > .pm
+      # Testes com cobertura (usa o gerenciador detectado)
+      - |
+        PM=$(cat .pm)
+        if [ "$PM" = "pnpm" ]; then
+          pnpm test -- --coverage --coverageReporters=json-summary
+        elif [ "$PM" = "yarn" ]; then
+          yarn test --coverage --coverageReporters=json-summary
+        else
+          npm test -- --coverage --coverageReporters=json-summary
+        fi
+      # Extrai % total para .coverage (contrato do gate)
       - node -e "console.log(require('./coverage/coverage-summary.json').total.statements.pct || 0)" > .coverage
 
   coverage_gate:
@@ -26,7 +54,6 @@ steps:
         echo "Coverage: ${TOTAL}%"
         awk -v t="$TOTAL" -v m="${MIN_COVERAGE}" 'BEGIN{ if(t+0 < m) exit 1 }' || (echo "Coverage abaixo de ${MIN_COVERAGE}%"; exit 1)
 
-  # Build & push sem docker.sock (Kaniko)
   build_push:
     image: gcr.io/kaniko-project/executor:latest
     depends_on: [coverage_gate]
@@ -37,18 +64,17 @@ steps:
         from_secret: REGISTRY_TOKEN
     commands:
       - SHA=${CI_COMMIT_SHA}
-      # autentica no GHCR gerando /kaniko/.docker/config.json
+      # auth GHCR
       - AUTH=$(printf "%s:%s" "$REGISTRY_USER" "$REGISTRY_TOKEN" | base64 -w 0 2>/dev/null || printf "%s:%s" "$REGISTRY_USER" "$REGISTRY_TOKEN" | base64)
       - |
         mkdir -p /kaniko/.docker
         cat > /kaniko/.docker/config.json <<EOF
         { "auths": { "${REGISTRY}": { "auth": "${AUTH}" } } }
         EOF
-      # builda e publica duas tags: sha e latest
-      - /kaniko/executor
-        --context "${CI_WORKSPACE}"
-        --dockerfile "${CI_WORKSPACE}/Dockerfile"
-        --destination "${IMAGE_REPO}:${SHA}"
+      - /kaniko/executor \
+        --context "${CI_WORKSPACE}" \
+        --dockerfile "${CI_WORKSPACE}/Dockerfile" \
+        --destination "${IMAGE_REPO}:${SHA}" \
         --destination "${IMAGE_REPO}:latest"
       - echo "${SHA}" > .tag_sha
 
@@ -89,7 +115,7 @@ steps:
       - mkdir -p $HOME/.kube
       - echo "$KUBE_CONFIG" > $HOME/.kube/config
       - chmod 600 $HOME/.kube/config
-      # imagePullSecret (GHCR) no namespace
+      # imagePullSecret do GHCR
       - kubectl -n ${KUBE_NAMESPACE} create secret docker-registry registry-cred \
         --docker-server=${REGISTRY} --docker-username="${REGISTRY_USER}" --docker-password="${REGISTRY_TOKEN}" \
         --dry-run=client -o yaml | kubectl apply -f -
@@ -107,7 +133,6 @@ steps:
           echo "type: Opaque"
           echo "stringData:"
           echo "  dotenv: |"
-          # ENV__* viram linhas do .env e também chaves individuais
           env | awk -F= '/^ENV__/ {
             key=substr($1,6); val=$0; sub(/^[^=]*=/,"",val);
             printf "    %s=%s\n", key, val
