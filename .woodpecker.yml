@@ -1,58 +1,79 @@
-when:
-  event: [push, manual]
-  branch: [main]
-
-variables:
-  REGISTRY: ${REGISTRY=ghcr.io}
-  IMAGE_REPO: ${IMAGE_REPO=${REGISTRY}/wellrcosta/${CI_REPO_NAME}}
-  KUBE_NAMESPACE: ${KUBE_NAMESPACE=local-services}
-  APP_NAME: ${APP_NAME=${CI_REPO_NAME}}
-  MIN_COVERAGE: ${MIN_COVERAGE=60}
-
 steps:
-  tests:
-    image: node:20-alpine
+  install-and-test:
+    name: Install & Test
+    image: node:20
     commands:
-      - npm i
-      - npm test -- --coverage --coverageReporters=json-summary
-      - node -e "console.log(require('./coverage/coverage-summary.json').total.statements.pct || 0)" > .coverage
+      - corepack enable
+      - |
+        if [ -f pnpm-lock.yaml ]; then
+          corepack prepare pnpm@latest --activate
+          pnpm install --frozen-lockfile || pnpm install
+          pnpm test -- --coverage --coverageReporters=lcov
+        elif [ -f yarn.lock ]; then
+          corepack prepare yarn@stable --activate
+          yarn install --frozen-lockfile || yarn install
+          yarn test --coverage --coverageReporters=lcov
+        elif [ -f package-lock.json ]; then
+          npm ci
+          npm run test -- --coverage --coverageReporters=lcov
+        else
+          npm install
+          npm run test -- --coverage --coverageReporters=lcov
+        fi
+    when:
+      branch: [main]
+      event: [push]
 
-  # Build & push sem docker.sock (Kaniko)
-  build_push:
-    image: gcr.io/kaniko-project/executor:latest
-    depends_on: [tests]
+  upload-coverage-codecov:
+    name: Upload Coverage to Codecov
+    image: alpine:latest
+    environment:
+      CODECOV_TOKEN:
+        from_secret: CODECOV_TOKEN
+    commands:
+      - apk add --no-cache curl bash
+      - curl -Os https://uploader.codecov.io/latest/linux/codecov
+      - chmod +x codecov
+      - ./codecov --token "$CODECOV_TOKEN" --fail-under=60 --file=coverage/lcov.info
+    depends_on: [install-and-test]
+    when:
+      branch: [main]
+      event: [push]
+
+  docker-build-push:
+    name: Docker Build & Push (GHCR)
+    image: docker:27.1-cli
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       REGISTRY_USER:
         from_secret: REGISTRY_USER
       REGISTRY_TOKEN:
         from_secret: REGISTRY_TOKEN
+      REGISTRY: ghcr.io
     commands:
+      - echo "${REGISTRY_TOKEN}" | docker login "${REGISTRY}" -u "${REGISTRY_USER}" --password-stdin
+      - IMAGE_REPO=${REGISTRY}/wellrcosta/${CI_REPO_NAME}
       - SHA=${CI_COMMIT_SHA}
-      # autentica no GHCR gerando /kaniko/.docker/config.json
-      - AUTH=$(printf "%s:%s" "$REGISTRY_USER" "$REGISTRY_TOKEN" | base64 -w 0 2>/dev/null || printf "%s:%s" "$REGISTRY_USER" "$REGISTRY_TOKEN" | base64)
-      - |
-        mkdir -p /kaniko/.docker
-        cat > /kaniko/.docker/config.json <<EOF
-        { "auths": { "${REGISTRY}": { "auth": "${AUTH}" } } }
-        EOF
-      # builda e publica duas tags: sha e latest
-      - /kaniko/executor
-        --context "${CI_WORKSPACE}"
-        --dockerfile "${CI_WORKSPACE}/Dockerfile"
-        --destination "${IMAGE_REPO}:${SHA}"
-        --destination "${IMAGE_REPO}:latest"
+      - docker build -t "${IMAGE_REPO}:${SHA}" -t "${IMAGE_REPO}:latest" .
+      - docker push "${IMAGE_REPO}:${SHA}"
+      - docker push "${IMAGE_REPO}:latest"
       - echo "${SHA}" > .tag_sha
+    depends_on: [upload-coverage-codecov]
+    when:
+      branch: [main]
+      event: [push]
 
-  bump_tag_commit:
+  bump-tag-commit:
+    name: Bump tag in deploy.values.yaml
     image: alpine:3.20
-    depends_on: [build_push]
     environment:
       GITHUB_TOKEN:
         from_secret: GITHUB_TOKEN
     commands:
       - apk add --no-cache git yq
       - git config --global user.email "ci@wellrcosta.dev"
-      - git config --global user.name "woodpecker-bot"
+      - git config --global user.name  "woodpecker-bot"
       - git remote set-url origin "https://wellrcosta:${GITHUB_TOKEN}@github.com/wellrcosta/${CI_REPO_NAME}.git"
       - SHA=$(cat .tag_sha)
       - |
@@ -62,13 +83,17 @@ steps:
           git commit -m "chore(ci): update image tag to ${SHA}" || true
           git push origin HEAD:main
         else
-          echo "deploy.values.yaml não encontrado; verifique se está na raiz."
+          echo "deploy.values.yaml não encontrado na raiz."
           exit 1
         fi
+    depends_on: [docker-build-push]
+    when:
+      branch: [main]
+      event: [push]
 
-  apply_secrets:
+  apply-secrets:
+    name: Apply Secrets to K8s
     image: bitnami/kubectl:1.30
-    depends_on: [bump_tag_commit]
     environment:
       KUBE_CONFIG:
         from_secret: KUBE_CONFIG
@@ -76,11 +101,12 @@ steps:
         from_secret: REGISTRY_USER
       REGISTRY_TOKEN:
         from_secret: REGISTRY_TOKEN
+      REGISTRY: ghcr.io
+      KUBE_NAMESPACE: ${KUBE_NAMESPACE=local-services}
+      APP_NAME: ${APP_NAME=${CI_REPO_NAME}}
     commands:
-      - mkdir -p $HOME/.kube
-      - echo "$KUBE_CONFIG" > $HOME/.kube/config
-      - chmod 600 $HOME/.kube/config
-      # imagePullSecret (GHCR) no namespace
+      - mkdir -p $HOME/.kube && echo "$KUBE_CONFIG" > $HOME/.kube/config && chmod 600 $HOME/.kube/config
+      # imagePullSecret (GHCR)
       - kubectl -n ${KUBE_NAMESPACE} create secret docker-registry registry-cred \
         --docker-server=${REGISTRY} --docker-username="${REGISTRY_USER}" --docker-password="${REGISTRY_TOKEN}" \
         --dry-run=client -o yaml | kubectl apply -f -
@@ -98,7 +124,6 @@ steps:
           echo "type: Opaque"
           echo "stringData:"
           echo "  dotenv: |"
-          # ENV__* viram linhas do .env e também chaves individuais
           env | awk -F= '/^ENV__/ {
             key=substr($1,6); val=$0; sub(/^[^=]*=/,"",val);
             printf "    %s=%s\n", key, val
@@ -110,3 +135,7 @@ steps:
           }'
         } > $TMP
         kubectl apply -f $TMP
+    depends_on: [bump-tag-commit]
+    when:
+      branch: [main]
+      event: [push]
