@@ -30,7 +30,7 @@ steps:
     image: docker:27.1-cli
     depends_on: [coverage_gate]
     environment:
-      - DOCKER_DRIVER=overlay2
+      DOCKER_DRIVER: overlay2
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     secrets: [REGISTRY_USER, REGISTRY_TOKEN]
