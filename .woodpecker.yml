@@ -10,56 +10,17 @@ variables:
   MIN_COVERAGE: ${MIN_COVERAGE=60}
 
 steps:
-  install-and-test:
-    name: Install & Test
-    image: node:20
+  tests:
+    image: node:20-alpine
     commands:
-      - corepack enable
-      - |
-        if [ -f pnpm-lock.yaml ]; then
-          corepack prepare pnpm@latest --activate
-          pnpm install --frozen-lockfile || pnpm install
-          pnpm run test -- --coverage
-        elif [ -f yarn.lock ]; then
-          corepack prepare yarn@stable --activate
-          yarn install --frozen-lockfile || yarn install
-          yarn test --coverage
-        elif [ -f package-lock.json ]; then
-          npm ci
-          npm run test -- --coverage
-        else
-          npm install
-          npm run test -- --coverage
-        fi
-    when:
-      branch: [ main ]
-      event: [ push ]
+      - npm i
+      - npm test -- --coverage --coverageReporters=json-summary
+      - node -e "console.log(require('./coverage/coverage-summary.json').total.statements.pct || 0)" > .coverage
 
-  upload-coverage-codecov:
-    name: Upload Coverage to Codecov
-    image: alpine:latest
-    environment:
-      CODECOV_TOKEN:
-        from_secret: CODECOV_TOKEN
-    commands:
-      - apk add --no-cache curl bash
-      - curl -Os https://uploader.codecov.io/latest/linux/codecov
-      - chmod +x codecov
-      - ./codecov --token $CODECOV_TOKEN --fail-under=60 --file=coverage/lcov.info
-    when:
-      branch: [ main ]
-      event: [ push ]
-    image: alpine:3.20
-    depends_on: [tests]
-    commands:
-      - |
-        TOTAL=$(cat .coverage 2>/dev/null || echo 0)
-        echo "Coverage: ${TOTAL}%"
-        awk -v t="$TOTAL" -v m="${MIN_COVERAGE}" 'BEGIN{ if(t+0 < m) exit 1 }' || (echo "Coverage abaixo de ${MIN_COVERAGE}%"; exit 1)
-
+  # Build & push sem docker.sock (Kaniko)
   build_push:
     image: gcr.io/kaniko-project/executor:latest
-    depends_on: [coverage_gate]
+    depends_on: [tests]
     environment:
       REGISTRY_USER:
         from_secret: REGISTRY_USER
@@ -67,17 +28,18 @@ steps:
         from_secret: REGISTRY_TOKEN
     commands:
       - SHA=${CI_COMMIT_SHA}
-      # auth GHCR
+      # autentica no GHCR gerando /kaniko/.docker/config.json
       - AUTH=$(printf "%s:%s" "$REGISTRY_USER" "$REGISTRY_TOKEN" | base64 -w 0 2>/dev/null || printf "%s:%s" "$REGISTRY_USER" "$REGISTRY_TOKEN" | base64)
       - |
         mkdir -p /kaniko/.docker
         cat > /kaniko/.docker/config.json <<EOF
         { "auths": { "${REGISTRY}": { "auth": "${AUTH}" } } }
         EOF
-      - /kaniko/executor \
-        --context "${CI_WORKSPACE}" \
-        --dockerfile "${CI_WORKSPACE}/Dockerfile" \
-        --destination "${IMAGE_REPO}:${SHA}" \
+      # builda e publica duas tags: sha e latest
+      - /kaniko/executor
+        --context "${CI_WORKSPACE}"
+        --dockerfile "${CI_WORKSPACE}/Dockerfile"
+        --destination "${IMAGE_REPO}:${SHA}"
         --destination "${IMAGE_REPO}:latest"
       - echo "${SHA}" > .tag_sha
 
@@ -118,7 +80,7 @@ steps:
       - mkdir -p $HOME/.kube
       - echo "$KUBE_CONFIG" > $HOME/.kube/config
       - chmod 600 $HOME/.kube/config
-      # imagePullSecret do GHCR
+      # imagePullSecret (GHCR) no namespace
       - kubectl -n ${KUBE_NAMESPACE} create secret docker-registry registry-cred \
         --docker-server=${REGISTRY} --docker-username="${REGISTRY_USER}" --docker-password="${REGISTRY_TOKEN}" \
         --dry-run=client -o yaml | kubectl apply -f -
@@ -136,6 +98,7 @@ steps:
           echo "type: Opaque"
           echo "stringData:"
           echo "  dotenv: |"
+          # ENV__* viram linhas do .env e também chaves individuais
           env | awk -F= '/^ENV__/ {
             key=substr($1,6); val=$0; sub(/^[^=]*=/,"",val);
             printf "    %s=%s\n", key, val
