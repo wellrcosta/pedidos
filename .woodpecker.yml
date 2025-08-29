@@ -72,10 +72,19 @@ steps:
           exit 1
         fi
 
-      # Atualizar arquivo usando CI_COMMIT_SHA diretamente
+      # Verificar se o token existe
+      - |
+        if [ -z "${GITHUB_TOKEN}" ]; then
+          echo "ERRO: GITHUB_TOKEN não definido" >&2
+          exit 1
+        fi
+        echo "Token GitHub disponível: ${#GITHUB_TOKEN} caracteres"
+
+      # Atualizar arquivo usando CI_COMMIT_SHA diretamente (preservando formatação)
       - |
         echo "Atualizando tag para: ${CI_COMMIT_SHA}"
-        yq -i ".tag = \"${CI_COMMIT_SHA}\"" deploy.values.yaml
+        # Usar yq com --prettyPrint para preservar formatação
+        yq -i --prettyPrint ".tag = \"${CI_COMMIT_SHA}\"" deploy.values.yaml
 
         # Verificar se houve mudanças
         if git diff --quiet deploy.values.yaml; then
@@ -90,9 +99,12 @@ steps:
         git add deploy.values.yaml
         git commit -m "chore(ci): update image tag to ${CI_COMMIT_SHA}"
 
-      # Push para o repositório
-      - git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${CI_REPO_OWNER}/${CI_REPO_NAME}.git"
-      - git push origin HEAD:main
+      # Push para o repositório (corrigindo autenticação)
+      - |
+        echo "Configurando remote com token..."
+        git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${CI_REPO_OWNER}/${CI_REPO_NAME}.git"
+        echo "Fazendo push..."
+        git push origin HEAD:main
 
     when:
       branch: [main]
