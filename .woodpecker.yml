@@ -91,13 +91,31 @@ steps:
         git add deploy.values.yaml
         git commit -m "chore(ci): update image tag to ${CI_COMMIT_SHA}"
 
-      # Push para o repositório (corrigindo expansão de variável)
+      # Push para o repositório (com debug de permissões)
       - |
         echo "Configurando remote com token..."
-        # Método 1: usando $GITHUB_TOKEN diretamente (sem chaves)
+        echo "Repositório: $CI_REPO_OWNER/$CI_REPO_NAME"
+
+        # Testar diferentes formatos de autenticação
+        echo "=== TENTATIVA 1: x-access-token ==="
         git remote set-url origin "https://x-access-token:$GITHUB_TOKEN@github.com/$CI_REPO_OWNER/$CI_REPO_NAME.git"
-        echo "Fazendo push..."
-        git push origin HEAD:main
+        git push origin HEAD:main || {
+          echo "ERRO: x-access-token falhou"
+          
+          echo "=== TENTATIVA 2: username direto ==="
+          git remote set-url origin "https://$CI_REPO_OWNER:$GITHUB_TOKEN@github.com/$CI_REPO_OWNER/$CI_REPO_NAME.git"
+          git push origin HEAD:main || {
+            echo "ERRO: username direto falhou"
+            
+            echo "=== TENTATIVA 3: token como username ==="
+            git remote set-url origin "https://$GITHUB_TOKEN@github.com/$CI_REPO_OWNER/$CI_REPO_NAME.git"
+            git push origin HEAD:main || {
+              echo "ERRO: Todas as tentativas de autenticação falharam"
+              echo "Verifique se o token tem permissão de WRITE no repositório $CI_REPO_OWNER/$CI_REPO_NAME"
+              exit 1
+            }
+          }
+        }
 
     when:
       branch: [main]
