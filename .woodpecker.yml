@@ -59,58 +59,12 @@ steps:
       - set -eu
       - apk add --no-cache git yq
 
-      # Debug: mostrar variáveis disponíveis
-      - echo "=== DEBUG INFO ==="
-      - echo "CI_REPO_OWNER=${CI_REPO_OWNER:-UNDEFINED}"
-      - echo "CI_REPO_NAME=${CI_REPO_NAME:-UNDEFINED}"
-      - echo "CI_COMMIT_SHA=${CI_COMMIT_SHA:-UNDEFINED}"
-      - echo "CI_REPO=${CI_REPO:-UNDEFINED}"
-      - echo "=================="
-
-      # 1) Verificar se variáveis essenciais existem
-      - |
-        if [ -z "${CI_REPO_OWNER:-}" ] || [ -z "${CI_REPO_NAME:-}" ]; then
-          echo "ERRO: Variáveis CI_REPO_OWNER ou CI_REPO_NAME não definidas" >&2
-          echo "Tentando usar CI_REPO como fallback..."
-          if [ -n "${CI_REPO:-}" ]; then
-            # CI_REPO geralmente está no formato "owner/repo"
-            export CI_REPO_OWNER=$(echo "$CI_REPO" | cut -d'/' -f1)
-            export CI_REPO_NAME=$(echo "$CI_REPO" | cut -d'/' -f2)
-            echo "Extraído: OWNER=$CI_REPO_OWNER, NAME=$CI_REPO_NAME"
-          else
-            echo "Nenhuma variável de repositório disponível" >&2
-            exit 1
-          fi
-        fi
-
-      # 2) Configurar git
+      # Configurar git
       - git config --global user.email "ci@wellrcosta.dev"
       - git config --global user.name "woodpecker-bot"
       - git config --global --add safe.directory /woodpecker/src
 
-      # 3) Determinar SHA a usar
-      - |
-        if [ -f .tag_sha ] && [ -s .tag_sha ]; then
-          SHA="$(cat .tag_sha | tr -d '\n\r' | xargs)"
-          echo "Usando SHA do arquivo .tag_sha: ${SHA}"
-        else
-          SHA="${CI_COMMIT_SHA}"
-          echo "Usando SHA do commit atual: ${SHA}"
-          if [ -f .tag_sha ]; then
-            echo "AVISO: Arquivo .tag_sha existe mas está vazio"
-          fi
-        fi
-
-        if [ -z "${SHA}" ]; then
-          echo "ERRO: Não foi possível determinar o SHA" >&2
-          exit 1
-        fi
-
-        echo "SHA final que será usado: ${SHA}"
-        # Exportar para usar nos próximos comandos
-        export SHA
-
-      # 4) Verificar se deploy.values.yaml existe
+      # Verificar se deploy.values.yaml existe
       - |
         if [ ! -f deploy.values.yaml ]; then
           echo "ERRO: deploy.values.yaml não encontrado na raiz do repositório" >&2
@@ -118,20 +72,10 @@ steps:
           exit 1
         fi
 
-      # 5) Mostrar conteúdo atual antes da alteração
-      - echo "=== CONTEÚDO ATUAL ==="
-      - cat deploy.values.yaml
-      - echo "===================="
-
-      # 6) Atualizar arquivo e verificar mudanças
+      # Atualizar arquivo usando CI_COMMIT_SHA diretamente
       - |
-        echo "Atualizando tag para: ${SHA}"
-        yq -i '.tag = strenv(SHA)' deploy.values.yaml
-
-        # Mostrar o que mudou
-        echo "=== APÓS ALTERAÇÃO ==="
-        cat deploy.values.yaml
-        echo "==================="
+        echo "Atualizando tag para: ${CI_COMMIT_SHA}"
+        yq -i ".tag = \"${CI_COMMIT_SHA}\"" deploy.values.yaml
 
         # Verificar se houve mudanças
         if git diff --quiet deploy.values.yaml; then
@@ -139,10 +83,14 @@ steps:
           exit 0
         fi
 
-        git add deploy.values.yaml
-        git commit -m "chore(ci): update image tag to ${SHA}"
+        echo "=== MUDANÇAS DETECTADAS ==="
+        git diff deploy.values.yaml
+        echo "=========================="
 
-      # 7) Configurar remote e fazer push
+        git add deploy.values.yaml
+        git commit -m "chore(ci): update image tag to ${CI_COMMIT_SHA}"
+
+      # Push para o repositório
       - git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${CI_REPO_OWNER}/${CI_REPO_NAME}.git"
       - git push origin HEAD:main
 
