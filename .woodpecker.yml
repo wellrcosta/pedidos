@@ -59,12 +59,6 @@ steps:
       - set -eu
       - apk add --no-cache git yq
 
-      # Debug das variáveis de ambiente
-      - echo "=== DEBUG SECRETS ==="
-      - env | grep -E "(GITHUB|CI_)" | head -10 || echo "Nenhuma variável encontrada"
-      - echo "GITHUB_TOKEN length:" ${#GITHUB_TOKEN} "chars" || echo "GITHUB_TOKEN não definido"
-      - echo "==================="
-
       # Configurar git
       - git config --global user.email "ci@wellrcosta.dev"
       - git config --global user.name "woodpecker-bot"
@@ -77,14 +71,6 @@ steps:
           ls -la . # mostrar conteúdo para debug
           exit 1
         fi
-
-      # Verificar se o token existe
-      - |
-        if [ -z "${GITHUB_TOKEN}" ]; then
-          echo "ERRO: GITHUB_TOKEN não definido" >&2
-          exit 1
-        fi
-        echo "Token GitHub disponível: ${#GITHUB_TOKEN} caracteres"
 
       # Atualizar arquivo usando CI_COMMIT_SHA diretamente (preservando formatação)
       - |
