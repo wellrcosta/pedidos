@@ -138,18 +138,15 @@ steps:
       - |
         set -eu
 
-        # defaults via shell - usando [ -z "$VAR" ] ao invés de ${VAR:-}
-        if [ -z "$KUBE_NAMESPACE" ]; then
-          export KUBE_NAMESPACE="local-services"
-        fi
+        # Inicializar variáveis que podem não estar definidas
+        KUBE_NAMESPACE="${KUBE_NAMESPACE:-local-services}"
+        DOCKER_SERVER="${DOCKER_SERVER:-https://index.docker.io/v1/}"
+        APP_NAME="${APP_NAME:-$CI_REPO_NAME}"
 
-        if [ -z "$DOCKER_SERVER" ]; then
-          export DOCKER_SERVER="https://index.docker.io/v1/"
-        fi
-
-        if [ -z "$APP_NAME" ]; then
-          export APP_NAME="$CI_REPO_NAME"
-        fi
+        # Exportar para uso posterior
+        export KUBE_NAMESPACE
+        export DOCKER_SERVER  
+        export APP_NAME
 
         echo "=== DEBUG ==="
         echo "KUBE_NAMESPACE=$KUBE_NAMESPACE"
