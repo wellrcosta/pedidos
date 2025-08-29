@@ -194,7 +194,16 @@ steps:
         # cria/atualiza Secret do app:
         # - cada linha vira uma key (via --from-env-file)  
         # - a cópia integral do .env vai em "dotenv" (via --from-file)
-        SECRET_NAME="${APP_NAME}-secrets"
+        echo "DEBUG: APP_NAME antes de criar SECRET_NAME: '$APP_NAME'"
+        SECRET_NAME="$APP_NAME-secrets"
+        echo "DEBUG: SECRET_NAME criado: '$SECRET_NAME'"
+
+        if [ -z "$SECRET_NAME" ] || [ "$SECRET_NAME" = "-secrets" ]; then
+          echo "ERRO: SECRET_NAME inválido, usando fallback"
+          SECRET_NAME="$CI_REPO_NAME-secrets"
+          echo "DEBUG: SECRET_NAME fallback: '$SECRET_NAME'"
+        fi
+
         echo "Criando secret: $SECRET_NAME"
         kubectl -n "$KUBE_NAMESPACE" create secret generic "$SECRET_NAME" \
           --from-env-file="$ENVFILE" \
