@@ -91,10 +91,11 @@ steps:
         git add deploy.values.yaml
         git commit -m "chore(ci): update image tag to ${CI_COMMIT_SHA}"
 
-      # Push para o repositório (corrigindo autenticação)
+      # Push para o repositório (corrigindo expansão de variável)
       - |
         echo "Configurando remote com token..."
-        git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${CI_REPO_OWNER}/${CI_REPO_NAME}.git"
+        # Método 1: usando $GITHUB_TOKEN diretamente (sem chaves)
+        git remote set-url origin "https://x-access-token:$GITHUB_TOKEN@github.com/$CI_REPO_OWNER/$CI_REPO_NAME.git"
         echo "Fazendo push..."
         git push origin HEAD:main
 
