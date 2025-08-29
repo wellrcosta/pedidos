@@ -90,12 +90,15 @@ steps:
 
       # 3) Determinar SHA a usar
       - |
-        if [ -f .tag_sha ]; then
-          SHA="$(cat .tag_sha)"
+        if [ -f .tag_sha ] && [ -s .tag_sha ]; then
+          SHA="$(cat .tag_sha | tr -d '\n\r' | xargs)"
           echo "Usando SHA do arquivo .tag_sha: ${SHA}"
         else
           SHA="${CI_COMMIT_SHA}"
           echo "Usando SHA do commit atual: ${SHA}"
+          if [ -f .tag_sha ]; then
+            echo "AVISO: Arquivo .tag_sha existe mas está vazio"
+          fi
         fi
 
         if [ -z "${SHA}" ]; then
@@ -103,6 +106,7 @@ steps:
           exit 1
         fi
 
+        echo "SHA final que será usado: ${SHA}"
         # Exportar para usar nos próximos comandos
         export SHA
 
