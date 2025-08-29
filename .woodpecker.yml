@@ -136,12 +136,21 @@ steps:
         from_secret: DOCKER_TOKEN
     commands:
       - |
-        set -eu
+        # Definir defaults sem usar ${VAR:-} para evitar problemas com set -eu
+        if [ -z "${KUBE_NAMESPACE+x}" ]; then
+          KUBE_NAMESPACE="local-services"
+        fi
 
-        # Inicializar variáveis que podem não estar definidas
-        KUBE_NAMESPACE="${KUBE_NAMESPACE:-local-services}"
-        DOCKER_SERVER="${DOCKER_SERVER:-https://index.docker.io/v1/}"
-        APP_NAME="${APP_NAME:-$CI_REPO_NAME}"
+        if [ -z "${DOCKER_SERVER+x}" ]; then
+          DOCKER_SERVER="https://index.docker.io/v1/"
+        fi
+
+        if [ -z "${APP_NAME+x}" ]; then
+          APP_NAME="$CI_REPO_NAME"
+        fi
+
+        # Agora sim, set -eu
+        set -eu
 
         # Exportar para uso posterior
         export KUBE_NAMESPACE
@@ -192,9 +201,11 @@ steps:
         echo "-------------------"
 
         # cria/atualiza Secret do app:
-        # - cada linha vira uma key (via --from-env-file)
+        # - cada linha vira uma key (via --from-env-file)  
         # - a cópia integral do .env vai em "dotenv" (via --from-file)
-        kubectl -n "$KUBE_NAMESPACE" create secret generic "${APP_NAME}-secrets" \
+        SECRET_NAME="${APP_NAME}-secrets"
+        echo "Criando secret: $SECRET_NAME"
+        kubectl -n "$KUBE_NAMESPACE" create secret generic "$SECRET_NAME" \
           --from-env-file="$ENVFILE" \
           --from-file="dotenv=$ENVFILE" \
           --dry-run=client -o yaml | kubectl apply -f -
