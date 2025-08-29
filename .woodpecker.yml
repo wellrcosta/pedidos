@@ -136,21 +136,12 @@ steps:
         from_secret: DOCKER_TOKEN
     commands:
       - |
-        # Definir defaults sem usar ${VAR:-} para evitar problemas com set -eu
-        if [ -z "${KUBE_NAMESPACE+x}" ]; then
-          KUBE_NAMESPACE="local-services"
-        fi
-
-        if [ -z "${DOCKER_SERVER+x}" ]; then
-          DOCKER_SERVER="https://index.docker.io/v1/"
-        fi
-
-        if [ -z "${APP_NAME+x}" ]; then
-          APP_NAME="$CI_REPO_NAME"
-        fi
-
-        # Agora sim, set -eu
         set -eu
+
+        # Inicializar variáveis que podem não estar definidas
+        KUBE_NAMESPACE="${KUBE_NAMESPACE:-local-services}"
+        DOCKER_SERVER="${DOCKER_SERVER:-https://index.docker.io/v1/}"
+        APP_NAME="${APP_NAME:-$CI_REPO_NAME}"
 
         # Exportar para uso posterior
         export KUBE_NAMESPACE
