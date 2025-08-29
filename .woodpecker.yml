@@ -152,10 +152,10 @@ steps:
         echo "============="
 
         # guards
-        if [ -z "${KUBE_CONFIG:-}" ]; then
+        if [ -z "$KUBE_CONFIG:-" ]; then
           echo "KUBE_CONFIG ausente (defina no Woodpecker Secrets)" >&2; exit 1
         fi
-        if [ -z "${DOCKER_USER:-}" ] || [ -z "${DOCKER_TOKEN:-}" ]; then
+        if [ -z "$DOCKER_USER:-" ] || [ -z "$DOCKER_TOKEN:-" ]; then
           echo "DOCKER_USER/DOCKER_TOKEN ausentes (defina no Woodpecker Secrets)" >&2; exit 1
         fi
 
@@ -166,9 +166,9 @@ steps:
 
         # imagePullSecret (Docker Hub)
         kubectl -n "${KUBE_NAMESPACE}" create secret docker-registry registry-cred \
-          --docker-server="${DOCKER_SERVER}" \
-          --docker-username="${DOCKER_USER}" \
-          --docker-password="${DOCKER_TOKEN}" \
+          --docker-server="$DOCKER_SERVER" \
+          --docker-username="$DOCKER_USER" \
+          --docker-password="$DOCKER_TOKEN" \
           --dry-run=client -o yaml | kubectl apply -f -
 
         # Secret com .env + espelho em env vars
