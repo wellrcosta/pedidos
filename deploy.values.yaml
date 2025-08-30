@@ -1,7 +1,7 @@
 name: pedidos
 namespace: local-services
 imageRepo: docker.io/wellrcosta/pedidos
-tag: 2d6cb872d39aa7b82f851cfe0563e15afea59511
+tag: 9b306ca1a545ab58daa528b0788ab4b89b234f6f
 port: 80
 expose: http
 host: pedidos.192.168.1.150.nip.io
