@@ -133,6 +133,8 @@ steps:
         from_secret: DOCKER_USER
       DOCKER_TOKEN:
         from_secret: DOCKER_TOKEN
+      ENV_VARS:
+        from_secret: ENV_VARS
     commands:
       - |
         set -eu
@@ -151,6 +153,7 @@ steps:
         echo "DOCKER_USER set? $([ -n "$DOCKER_USER" ] && echo yes || echo no)"
         echo "DOCKER_TOKEN set? $([ -n "$DOCKER_TOKEN" ] && echo yes || echo no)"
         echo "KUBE_CONFIG set? $([ -n "$KUBE_CONFIG" ] && echo yes || echo no)"
+        echo "ENV_VARS set? $([ -n "$ENV_VARS" ] && echo yes || echo no)"
         echo "============="
 
         # Guard para KUBE_CONFIG
@@ -175,23 +178,23 @@ steps:
           echo "Aviso: DOCKER_USER/DOCKER_TOKEN não definidos — pulando registry-cred."
         fi
 
-        # Gerar .env a partir das ENV__*
-        echo "=== DEBUG: BUSCANDO VARIÁVEIS ENV__ ==="
-        env | grep "^ENV__" || echo "Nenhuma variável ENV__ encontrada"
-        echo "==========================================="
-
-        echo "=== DEBUG: VERIFICANDO ALGUNS SECRETS CONHECIDOS ==="
-        echo "ENV__PORT definido? $([ -n "${ENV__PORT:-}" ] && echo yes || echo no)"
-        echo "DOCKER_USER definido? $([ -n "${DOCKER_USER:-}" ] && echo yes || echo no)"
-        echo "============================================"
-
+        # Gerar .env apenas se ENV_VARS estiver definido
         ENVFILE="/tmp/.env.gen"
         : > "$ENVFILE"
-        env | awk -F= '/^ENV__/ { key=substr($1,6); $1=""; sub(/^=/,""); print key"="$0 }' > "$ENVFILE"
 
-        echo "--- .env gerado ---"
-        cat "$ENVFILE" || true
-        echo "-------------------"
+        if [ -n "$ENV_VARS" ]; then
+          echo "=== ENV_VARS encontrado, processando... ==="
+          echo "Conteúdo: $ENV_VARS"
+          
+          # Converter formato VAR_1=valor1,VAR_2=valor2 para formato .env
+          echo "$ENV_VARS" | tr ',' '\n' > "$ENVFILE"
+          
+          echo "--- .env gerado ---"
+          cat "$ENVFILE" || true
+          echo "-------------------"
+        else
+          echo "ENV_VARS não definido - secret será criado vazio"
+        fi
 
         # Criar secret da aplicação
         SECRET_NAME="$CI_REPO_NAME-secrets"
