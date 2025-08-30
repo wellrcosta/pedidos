@@ -192,33 +192,20 @@ steps:
         echo "-------------------"
 
         # cria/atualiza Secret do app:
-        # - cada linha vira uma key (via --from-env-file)  
-        # - a cópia integral do .env vai em "dotenv" (via --from-file)
+        # - cada linha vira uma key (via --from-env-file)
         echo "DEBUG: APP_NAME antes de criar SECRET_NAME: '$APP_NAME'"
-        SECRET_NAME="$APP_NAME-secrets"
-        echo "DEBUG: SECRET_NAME criado: '$SECRET_NAME'"
+        echo "DEBUG: CI_REPO_NAME: '$CI_REPO_NAME'"
 
-        if [ -z "$SECRET_NAME" ] || [ "$SECRET_NAME" = "-secrets" ]; then
-          echo "ERRO: SECRET_NAME inválido, usando fallback"
-          SECRET_NAME="$CI_REPO_NAME-secrets"
-          echo "DEBUG: SECRET_NAME fallback: '$SECRET_NAME'"
-        fi
+        # Usar CI_REPO_NAME diretamente para evitar problemas de expansão
+        SECRET_NAME="$CI_REPO_NAME-secrets"
+        echo "DEBUG: SECRET_NAME usando CI_REPO_NAME: '$SECRET_NAME'"
 
         echo "Criando secret: $SECRET_NAME"
 
-        # Criar secret com variáveis individuais do .env
+        # Criar apenas um secret com as variáveis do .env
         kubectl -n "$KUBE_NAMESPACE" create secret generic "$SECRET_NAME" \
           --from-env-file="$ENVFILE" \
-          --dry-run=client -o yaml > /tmp/secret.yaml
-
-        # Adicionar o arquivo .env completo como uma key separada
-        kubectl -n "$KUBE_NAMESPACE" create secret generic "${SECRET_NAME}-dotenv" \
-          --from-file="dotenv=$ENVFILE" \
-          --dry-run=client -o yaml > /tmp/secret-dotenv.yaml
-
-        # Aplicar os secrets
-        kubectl apply -f /tmp/secret.yaml
-        kubectl apply -f /tmp/secret-dotenv.yaml
+          --dry-run=client -o yaml | kubectl apply -f -
         echo "DEBUG: APP_NAME antes de criar SECRET_NAME: '$APP_NAME'"
         SECRET_NAME="$APP_NAME-secrets"
         echo "DEBUG: SECRET_NAME criado: '$SECRET_NAME'"
