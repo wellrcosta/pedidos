@@ -176,6 +176,10 @@ steps:
         fi
 
         # Gerar .env a partir das ENV__*
+        echo "=== DEBUG: BUSCANDO VARIÁVEIS ENV__ ==="
+        env | grep "^ENV__" || echo "Nenhuma variável ENV__ encontrada"
+        echo "==========================================="
+
         ENVFILE="/tmp/.env.gen"
         : > "$ENVFILE"
         env | awk -F= '/^ENV__/ { key=substr($1,6); $1=""; sub(/^=/,""); print key"="$0 }' > "$ENVFILE"
