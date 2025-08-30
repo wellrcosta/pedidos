@@ -127,7 +127,6 @@ steps:
     environment:
       DOCKER_SERVER: https://index.docker.io/v1/
       KUBE_NAMESPACE: local-services
-      # secrets:
       KUBE_CONFIG:
         from_secret: KUBE_CONFIG
       DOCKER_USER:
@@ -138,37 +137,34 @@ steps:
       - |
         set -eu
 
-        # Inicializar variáveis que podem não estar definidas
+        # Inicializar variáveis
         KUBE_NAMESPACE="${KUBE_NAMESPACE:-local-services}"
         DOCKER_SERVER="${DOCKER_SERVER:-https://index.docker.io/v1/}"
         APP_NAME="${APP_NAME:-$CI_REPO_NAME}"
 
-        # Exportar para uso posterior
-        export KUBE_NAMESPACE
-        export DOCKER_SERVER  
-        export APP_NAME
+        export KUBE_NAMESPACE DOCKER_SERVER APP_NAME
 
         echo "=== DEBUG ==="
         echo "KUBE_NAMESPACE=$KUBE_NAMESPACE"
-        echo "APP_NAME=$APP_NAME"
+        echo "APP_NAME=$APP_NAME" 
         echo "DOCKER_SERVER=$DOCKER_SERVER"
         echo "DOCKER_USER set? $([ -n "$DOCKER_USER" ] && echo yes || echo no)"
         echo "DOCKER_TOKEN set? $([ -n "$DOCKER_TOKEN" ] && echo yes || echo no)"
         echo "KUBE_CONFIG set? $([ -n "$KUBE_CONFIG" ] && echo yes || echo no)"
         echo "============="
 
-        # guard para KUBE_CONFIG
+        # Guard para KUBE_CONFIG
         if [ -z "$KUBE_CONFIG" ]; then
           echo "KUBE_CONFIG ausente (defina no Woodpecker Secrets e marque Include secrets ao disparar manual)." >&2
           exit 1
         fi
 
-        # kubeconfig
+        # Configurar kubeconfig
         mkdir -p "$HOME/.kube"
         echo "$KUBE_CONFIG" > "$HOME/.kube/config"
         chmod 600 "$HOME/.kube/config"
 
-        # imagePullSecret (só se tiver credenciais; se imagem for pública, pula)
+        # Criar imagePullSecret se credenciais disponíveis
         if [ -n "$DOCKER_USER" ] && [ -n "$DOCKER_TOKEN" ]; then
           kubectl -n "$KUBE_NAMESPACE" create secret docker-registry registry-cred \
             --docker-server="$DOCKER_SERVER" \
@@ -176,51 +172,27 @@ steps:
             --docker-password="$DOCKER_TOKEN" \
             --dry-run=client -o yaml | kubectl apply -f -
         else
-          echo "Aviso: DOCKER_USER/DOCKER_TOKEN não definidos — pulando registry-cred (ok se imagem for pública)."
+          echo "Aviso: DOCKER_USER/DOCKER_TOKEN não definidos — pulando registry-cred."
         fi
 
-        # gerar .env a partir das ENV__*
+        # Gerar .env a partir das ENV__*
         ENVFILE="/tmp/.env.gen"
-        # limpa arquivo anterior
         : > "$ENVFILE"
-        # copia variáveis com prefixo ENV__ removendo o prefixo
-        # Ex.: ENV__PORT=80 -> PORT=80
         env | awk -F= '/^ENV__/ { key=substr($1,6); $1=""; sub(/^=/,""); print key"="$0 }' > "$ENVFILE"
 
         echo "--- .env gerado ---"
         cat "$ENVFILE" || true
         echo "-------------------"
 
-        # cria/atualiza Secret do app:
-        # - cada linha vira uma key (via --from-env-file)
-        echo "DEBUG: APP_NAME antes de criar SECRET_NAME: '$APP_NAME'"
-        echo "DEBUG: CI_REPO_NAME: '$CI_REPO_NAME'"
-
-        # Usar CI_REPO_NAME diretamente para evitar problemas de expansão
+        # Criar secret da aplicação
         SECRET_NAME="$CI_REPO_NAME-secrets"
-        echo "DEBUG: SECRET_NAME usando CI_REPO_NAME: '$SECRET_NAME'"
-
         echo "Criando secret: $SECRET_NAME"
 
-        # Criar apenas um secret com as variáveis do .env
         kubectl -n "$KUBE_NAMESPACE" create secret generic "$SECRET_NAME" \
           --from-env-file="$ENVFILE" \
           --dry-run=client -o yaml | kubectl apply -f -
-        echo "DEBUG: APP_NAME antes de criar SECRET_NAME: '$APP_NAME'"
-        SECRET_NAME="$APP_NAME-secrets"
-        echo "DEBUG: SECRET_NAME criado: '$SECRET_NAME'"
-
-        if [ -z "$SECRET_NAME" ] || [ "$SECRET_NAME" = "-secrets" ]; then
-          echo "ERRO: SECRET_NAME inválido, usando fallback"
-          SECRET_NAME="$CI_REPO_NAME-secrets"
-          echo "DEBUG: SECRET_NAME fallback: '$SECRET_NAME'"
-        fi
-
-        echo "Criando secret: $SECRET_NAME"
-        kubectl -n "$KUBE_NAMESPACE" create secret generic "$SECRET_NAME" \
-          --from-env-file="$ENVFILE" \
-          --from-file="dotenv=$ENVFILE" \
-          --dry-run=client -o yaml | kubectl apply -f -
+          
+        echo "Secret $SECRET_NAME criado/atualizado com sucesso!"
     when:
       branch: [main]
       event: [push, manual]
