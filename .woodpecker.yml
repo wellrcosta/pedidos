@@ -200,9 +200,17 @@ steps:
         SECRET_NAME="$CI_REPO_NAME-secrets"
         echo "Criando secret: $SECRET_NAME"
 
-        kubectl -n "$KUBE_NAMESPACE" create secret generic "$SECRET_NAME" \
-          --from-env-file="$ENVFILE" \
-          --dry-run=client -o yaml | kubectl apply -f -
+        if [ -s "$ENVFILE" ]; then
+          echo "Arquivo .env tem conteúdo - criando secret completo"
+          kubectl -n "$KUBE_NAMESPACE" create secret generic "$SECRET_NAME" \
+            --from-env-file="$ENVFILE" \
+            --from-file="dotenv=$ENVFILE" \
+            --dry-run=client -o yaml | kubectl apply -f -
+        else
+          echo "Arquivo .env vazio - criando secret sem dados"
+          kubectl -n "$KUBE_NAMESPACE" create secret generic "$SECRET_NAME" \
+            --dry-run=client -o yaml | kubectl apply -f -
+        fi
           
         echo "Secret $SECRET_NAME criado/atualizado com sucesso!"
     when:
