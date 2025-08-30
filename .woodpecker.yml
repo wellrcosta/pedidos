@@ -180,6 +180,11 @@ steps:
         env | grep "^ENV__" || echo "Nenhuma variável ENV__ encontrada"
         echo "==========================================="
 
+        echo "=== DEBUG: VERIFICANDO ALGUNS SECRETS CONHECIDOS ==="
+        echo "ENV__PORT definido? $([ -n "${ENV__PORT:-}" ] && echo yes || echo no)"
+        echo "DOCKER_USER definido? $([ -n "${DOCKER_USER:-}" ] && echo yes || echo no)"
+        echo "============================================"
+
         ENVFILE="/tmp/.env.gen"
         : > "$ENVFILE"
         env | awk -F= '/^ENV__/ { key=substr($1,6); $1=""; sub(/^=/,""); print key"="$0 }' > "$ENVFILE"
