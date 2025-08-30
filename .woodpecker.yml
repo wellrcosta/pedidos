@@ -203,25 +203,23 @@ steps:
         if [ -s "$ENVFILE" ]; then
           echo "Arquivo .env tem conteúdo - criando secret completo"
           
-          # Criar secret base com variáveis individuais
+          # Criar secret com variáveis individuais
           kubectl -n "$KUBE_NAMESPACE" create secret generic "$SECRET_NAME" \
             --from-env-file="$ENVFILE" \
-            --dry-run=client -o yaml > /tmp/secret-base.yaml
+            --dry-run=client -o yaml > /tmp/secret.yaml
           
-          # Criar secret com arquivo dotenv
-          kubectl -n "$KUBE_NAMESPACE" create secret generic "${SECRET_NAME}-temp" \
-            --from-file="dotenv=$ENVFILE" \
-            --dry-run=client -o yaml > /tmp/secret-dotenv.yaml
+          # Adicionar a key dotenv manualmente usando base64
+          echo "Adicionando key dotenv ao secret..."
+          DOTENV_B64=$(base64 -w 0 < "$ENVFILE")
           
-          # Combinar os dois secrets em um usando yq/awk
-          echo "Combinando secrets..."
+          # Inserir a key dotenv no YAML antes da última linha (kind: Secret)
+          sed -i "/^data:/a\\  dotenv: $DOTENV_B64" /tmp/secret.yaml
           
-          # Extrair a key dotenv do segundo secret e adicionar ao primeiro
-          DOTENV_VALUE=$(grep -A1 "dotenv:" /tmp/secret-dotenv.yaml | tail -1 | sed 's/^  //')
-          echo "  dotenv: $DOTENV_VALUE" >> /tmp/secret-base.yaml
+          echo "Secret YAML final:"
+          cat /tmp/secret.yaml
           
-          # Aplicar o secret combinado
-          kubectl apply -f /tmp/secret-base.yaml
+          # Aplicar o secret
+          kubectl apply -f /tmp/secret.yaml
         else
           echo "Arquivo .env vazio - criando secret sem dados"
           kubectl -n "$KUBE_NAMESPACE" create secret generic "$SECRET_NAME" \
